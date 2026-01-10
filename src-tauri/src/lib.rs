@@ -12,12 +12,18 @@ fn read_file_content(path: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to read file: {}", e))
 }
 
+#[tauri::command]
+fn write_file_content(path: String, content: String) -> Result<(), String> {
+    fs::write(&path, content)
+        .map_err(|e| format!("Failed to write file: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet, read_file_content])
+        .invoke_handler(tauri::generate_handler![greet, read_file_content, write_file_content])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
