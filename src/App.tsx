@@ -136,7 +136,7 @@ function App() {
     <div className="min-h-screen transition-colors duration-300">
       {/* Header */}
       <header className="border-b border-gray-200 dark:border-zinc-800 backdrop-blur-sm sticky top-0 z-10 transition-colors duration-300">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-800 dark:text-zinc-100">
             ZenMarkdown
           </h1>
@@ -161,7 +161,7 @@ function App() {
         {/* Tabs */}
         {tabs.length > 0 && (
           <div className="border-t border-gray-200 dark:border-zinc-800">
-            <div className="max-w-5xl mx-auto px-6 flex items-center gap-2 overflow-x-auto">
+            <div className="max-w-7xl mx-auto px-6 flex items-center gap-2 overflow-x-auto">
               {tabs.map(tab => (
                 <div
                   key={tab.id}
@@ -196,7 +196,7 @@ function App() {
       </header>
 
       {/* Content */}
-      <main className="max-w-3xl mx-auto px-6 py-12">
+      <main className="max-w-7xl mx-auto px-6 py-12">
         {error && (
           <div className="mb-6 p-4 bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-900 rounded-lg">
             <p className="text-red-700 dark:text-red-300">{error}</p>

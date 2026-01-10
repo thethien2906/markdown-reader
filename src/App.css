@@ -1,9 +1,9 @@
+/* Import Google Fonts for better typography */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* Import Google Fonts for better typography */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 /* Global Typography Settings */
 html {
@@ -67,7 +67,7 @@ html.dark header {
   background: #71717A; /* Zinc-500 */
 }
 
-/* Markdown Content Container - Nguyên tắc 1: 75 ký tự */
+/* Markdown Content Container - Nguyên tắc 1: 100 ký tự để tận dụng màn hình lớn */
 .markdown-content {
   max-width: 100ch;
   margin: 0 auto;
