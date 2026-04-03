@@ -5,7 +5,15 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { FolderOpen, File as FileIcon, ChevronRight, ChevronDown, FileText } from "lucide-react";
 import "./App.css";
+
+interface FileEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  children: FileEntry[] | null;
+}
 
 interface Tab {
   id: string;
@@ -21,6 +29,9 @@ function App() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [error, setError] = useState<string>("");
   const [isDark, setIsDark] = useState<boolean>(false);
+  const [explorerFiles, setExplorerFiles] = useState<FileEntry[] | null>(null);
+  const [explorerRoot, setExplorerRoot] = useState<string | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
   // Auto-detect system preference on mount
   useEffect(() => {
@@ -56,41 +67,129 @@ function App() {
     }
   }
 
-  async function openFile() {
+  async function openFile(filePath?: string) {
     try {
-      const selected = await open({
-        multiple: false,
-        filters: [
-          {
-            name: "Text Files",
-            extensions: ["md", "markdown", "txt"],
-          },
-        ],
-      });
-
-      if (selected && typeof selected === "string") {
-        const content = await invoke<string>("read_file_content", {
-          path: selected,
+      let selectedPath = filePath;
+      
+      if (!selectedPath) {
+        const selected = await open({
+          multiple: false,
+          filters: [
+            {
+              name: "Text Files",
+              extensions: ["md", "markdown", "txt"],
+            },
+          ],
         });
-        
-        const fileName = selected.split("\\").pop() || selected.split("/").pop() || "Untitled";
-        const newTab: Tab = {
-          id: Date.now().toString(),
-          fileName,
-          filePath: selected,
-          content,
-          isEditMode: false,
-          hasUnsavedChanges: false,
-        };
-        
-        setTabs([...tabs, newTab]);
-        setActiveTabId(newTab.id);
-        setError("");
+        if (selected && typeof selected === "string") {
+          selectedPath = selected;
+        } else {
+          return; // Cancelled
+        }
       }
+
+      // Check if file is already open
+      const existingTab = tabs.find(t => t.filePath === selectedPath);
+      if (existingTab) {
+        setActiveTabId(existingTab.id);
+        return;
+      }
+
+      const content = await invoke<string>("read_file_content", {
+        path: selectedPath,
+      });
+      
+      const fileName = selectedPath.split("\\").pop() || selectedPath.split("/").pop() || "Untitled";
+      const newTab: Tab = {
+        id: Date.now().toString(),
+        fileName,
+        filePath: selectedPath,
+        content,
+        isEditMode: false,
+        hasUnsavedChanges: false,
+      };
+      
+      setTabs(prev => [...prev, newTab]);
+      setActiveTabId(newTab.id);
+      setError("");
     } catch (err) {
       setError(`Error: ${err}`);
     }
   }
+
+  async function openFolder() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+      });
+
+      if (selected && typeof selected === "string") {
+        const files = await invoke<FileEntry[]>("get_directory_structure", {
+          path: selected,
+        });
+        setExplorerRoot(selected);
+        setExplorerFiles(files);
+        setExpandedFolders(new Set()); // Reset expansions when opening new folder
+        setError("");
+      }
+    } catch (err) {
+      setError(`Error opening folder: ${err}`);
+    }
+  }
+
+  function toggleFolder(path: string) {
+    const newExpanded = new Set(expandedFolders);
+    if (newExpanded.has(path)) {
+      newExpanded.delete(path);
+    } else {
+      newExpanded.add(path);
+    }
+    setExpandedFolders(newExpanded);
+  }
+
+  const FileTreeNode = ({ entry, depth = 0 }: { entry: FileEntry, depth?: number }) => {
+    const isExpanded = expandedFolders.has(entry.path);
+    const isMd = entry.name.toLowerCase().endsWith('.md') || entry.name.toLowerCase().endsWith('.markdown');
+
+    if (entry.is_dir) {
+      return (
+        <div>
+          <div 
+            className="flex items-center gap-1.5 py-1 px-2 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded cursor-pointer text-gray-700 dark:text-zinc-300 text-sm select-none"
+            style={{ paddingLeft: `${depth * 12 + 8}px` }}
+            onClick={() => toggleFolder(entry.path)}
+          >
+            {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+            <FolderOpen className="w-4 h-4 text-blue-500 dark:text-cyan-500" />
+            <span className="truncate">{entry.name}</span>
+          </div>
+          {isExpanded && entry.children && (
+            <div>
+              {entry.children.map((child, idx) => (
+                <FileTreeNode key={`${child.path}-${idx}`} entry={child} depth={depth + 1} />
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div 
+        className="flex items-center gap-1.5 py-1 px-2 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded cursor-pointer text-gray-600 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-zinc-200 text-sm select-none"
+        style={{ paddingLeft: `${depth * 12 + 24}px` }}
+        onClick={() => openFile(entry.path)}
+      >
+        {isMd ? (
+          <FileText className="w-4 h-4 text-green-600 dark:text-green-400 opacity-80" />
+        ) : (
+          <FileIcon className="w-4 h-4 text-gray-400 opacity-80" />
+        )}
+        <span className="truncate">{entry.name}</span>
+      </div>
+    );
+  };
 
   function closeTab(tabId: string) {
     const newTabs = tabs.filter(tab => tab.id !== tabId);
@@ -172,10 +271,16 @@ function App() {
               {isDark ? "🌙" : "☀️"}
             </button>
             <button
-              onClick={openFile}
+              onClick={() => openFile()}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-cyan-600 dark:hover:bg-cyan-700 text-white rounded-lg transition-colors font-medium"
             >
               Open File
+            </button>
+            <button
+              onClick={openFolder}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-gray-800 dark:text-zinc-200 rounded-lg transition-colors font-medium border border-gray-200 dark:border-zinc-700"
+            >
+              Open Folder
             </button>
           </div>
         </div>
@@ -217,8 +322,26 @@ function App() {
         )}
       </header>
 
-      {/* Content */}
-      <main className="max-w-7xl mx-auto px-6 py-12">
+      <div className="flex h-[calc(100vh-120px)]">
+        {/* Sidebar */}
+        {explorerFiles && (
+          <aside className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-[#121214] overflow-y-auto">
+            <div className="p-4">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-zinc-500 mb-3 truncate" title={explorerRoot || ""}>
+                {explorerRoot ? explorerRoot.split("\\").pop() || explorerRoot.split("/").pop() : "Explorer"}
+              </h2>
+              <div className="flex flex-col gap-0.5">
+                {explorerFiles.map((entry, idx) => (
+                  <FileTreeNode key={`${entry.path}-${idx}`} entry={entry} />
+                ))}
+              </div>
+            </div>
+          </aside>
+        )}
+
+        {/* Content Area */}
+        <main className="flex-1 overflow-y-auto w-full">
+          <div className="max-w-5xl mx-auto px-6 py-8">
         {error && (
           <div className="mb-6 p-4 bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-900 rounded-lg">
             <p className="text-red-700 dark:text-red-300">{error}</p>
@@ -350,7 +473,9 @@ function App() {
             </p>
           </div>
         )}
-      </main>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
