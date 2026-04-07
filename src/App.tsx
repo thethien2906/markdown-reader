@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { FolderOpen, File as FileIcon, ChevronRight, ChevronDown, FileText } from "lucide-react";
+import { FolderOpen, File as FileIcon, ChevronRight, ChevronDown, FileText, RefreshCw } from "lucide-react";
 import "./App.css";
 
 interface FileEntry {
@@ -32,6 +33,7 @@ function App() {
   const [explorerFiles, setExplorerFiles] = useState<FileEntry[] | null>(null);
   const [explorerRoot, setExplorerRoot] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Auto-detect system preference on mount
   useEffect(() => {
@@ -117,6 +119,54 @@ function App() {
     }
   }
 
+  // Helper to update a specific folder's children in the tree
+  const refreshTree = useCallback(async (rootPath: string, expanded: Set<string>) => {
+    async function getTree(path: string): Promise<FileEntry[]> {
+      const files = await invoke<FileEntry[]>("get_directory_structure", { 
+        path, 
+        recursive: false 
+      });
+      
+      // For each directory that is currently expanded, fetch its children too
+      const updatedFiles = await Promise.all(files.map(async (file) => {
+        if (file.is_dir && expanded.has(file.path)) {
+          return {
+            ...file,
+            children: await getTree(file.path)
+          };
+        }
+        return file;
+      }));
+      
+      return updatedFiles;
+    }
+
+    try {
+      const newFiles = await getTree(rootPath);
+      setExplorerFiles(newFiles);
+    } catch (err) {
+      console.error("Failed to refresh tree:", err);
+    }
+  }, []);
+
+  // Listen for file system changes from Rust
+  useEffect(() => {
+    let unlisten: any;
+    
+    async function setupListener() {
+      unlisten = await listen("fs-update", () => {
+        if (explorerRoot) {
+          refreshTree(explorerRoot, expandedFolders);
+        }
+      });
+    }
+
+    setupListener();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [explorerRoot, expandedFolders, refreshTree]);
+
   async function openFolder() {
     try {
       const selected = await open({
@@ -125,12 +175,18 @@ function App() {
       });
 
       if (selected && typeof selected === "string") {
+        setExplorerRoot(selected);
+        setExpandedFolders(new Set()); // Reset expansions when opening new folder
+        
+        // Start watching this folder recursively in Rust
+        await invoke("watch_folder", { path: selected });
+        
+        // Initial top-level fetch
         const files = await invoke<FileEntry[]>("get_directory_structure", {
           path: selected,
+          recursive: false,
         });
-        setExplorerRoot(selected);
         setExplorerFiles(files);
-        setExpandedFolders(new Set()); // Reset expansions when opening new folder
         setError("");
       }
     } catch (err) {
@@ -138,14 +194,22 @@ function App() {
     }
   }
 
-  function toggleFolder(path: string) {
+  async function toggleFolder(path: string) {
     const newExpanded = new Set(expandedFolders);
-    if (newExpanded.has(path)) {
-      newExpanded.delete(path);
-    } else {
+    const isExpanding = !newExpanded.has(path);
+    
+    if (isExpanding) {
       newExpanded.add(path);
+      setExpandedFolders(newExpanded);
+      
+      // Lazy load children if they haven't been loaded yet
+      if (explorerRoot) {
+        await refreshTree(explorerRoot, newExpanded);
+      }
+    } else {
+      newExpanded.delete(path);
+      setExpandedFolders(newExpanded);
     }
-    setExpandedFolders(newExpanded);
   }
 
   const FileTreeNode = ({ entry, depth = 0 }: { entry: FileEntry, depth?: number }) => {
@@ -327,9 +391,24 @@ function App() {
         {explorerFiles && (
           <aside className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-[#121214] overflow-y-auto">
             <div className="p-4">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-zinc-500 mb-3 truncate" title={explorerRoot || ""}>
-                {explorerRoot ? explorerRoot.split("\\").pop() || explorerRoot.split("/").pop() : "Explorer"}
-              </h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-zinc-500 truncate" title={explorerRoot || ""}>
+                  {explorerRoot ? explorerRoot.split("\\").pop() || explorerRoot.split("/").pop() : "Explorer"}
+                </h2>
+                <button 
+                  onClick={async () => {
+                    if (explorerRoot && !isRefreshing) {
+                      setIsRefreshing(true);
+                      await refreshTree(explorerRoot, expandedFolders);
+                      setIsRefreshing(false);
+                    }
+                  }}
+                  className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-zinc-800 text-gray-500 transition-all ${isRefreshing ? "animate-spin" : ""}`}
+                  title="Refresh Explorer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
               <div className="flex flex-col gap-0.5">
                 {explorerFiles.map((entry, idx) => (
                   <FileTreeNode key={`${entry.path}-${idx}`} entry={entry} />
