@@ -35,6 +35,62 @@ function App() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Layout states
+  const [sidebarWidth, setSidebarWidth] = useState(256);
+  const [isResizing, setIsResizing] = useState(false);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    tabId: string | null;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    tabId: null,
+  });
+
+  // Handle resizing
+  const startResizing = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  const resize = useCallback(
+    (e: MouseEvent) => {
+      if (isResizing) {
+        setSidebarWidth(Math.max(200, Math.min(e.clientX, 600))); // Min 200px, Max 600px
+      }
+    },
+    [isResizing]
+  );
+
+  useEffect(() => {
+    window.addEventListener("mousemove", resize);
+    window.addEventListener("mouseup", stopResizing);
+    return () => {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+    };
+  }, [resize, stopResizing]);
+
+  // Handle closing context menu
+  useEffect(() => {
+    const handleClick = () => {
+      if (contextMenu.visible) {
+        setContextMenu({ ...contextMenu, visible: false });
+      }
+    };
+    window.addEventListener("click", handleClick);
+    return () => window.removeEventListener("click", handleClick);
+  }, [contextMenu]);
+
   // Auto-detect system preference on mount
   useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -264,6 +320,40 @@ function App() {
     }
   }
 
+  function closeAllTabs() {
+    setTabs([]);
+    setActiveTabId(null);
+  }
+
+  function closeSavedTabs() {
+    const newTabs = tabs.filter(tab => tab.hasUnsavedChanges);
+    setTabs(newTabs);
+    if (!newTabs.find(t => t.id === activeTabId)) {
+      setActiveTabId(newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null);
+    }
+  }
+
+  function closeOtherTabs(tabId: string) {
+    const newTabs = tabs.filter(tab => tab.id === tabId || tab.hasUnsavedChanges);
+    // Even if unsaved, we at least keep the tabId. We don't want to close unsaved tabs silently
+    // Or normally "Close Other" closes ALL others? Let's just keep the tabId and unsaved ones, or if the user forces, just close others.
+    // Standard behavior: close all others unless they have unsaved changes.
+    setTabs(newTabs);
+    if (!newTabs.find(t => t.id === activeTabId)) {
+      setActiveTabId(tabId);
+    }
+  }
+
+  function handleTabContextMenu(e: React.MouseEvent, tabId: string) {
+    e.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      tabId: tabId,
+    });
+  }
+
   function toggleEditMode(tabId: string) {
     setTabs(tabs.map(tab => 
       tab.id === tabId ? { ...tab, isEditMode: !tab.isEditMode } : tab
@@ -318,9 +408,48 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen transition-colors duration-300">
+    <div className="min-h-screen flex flex-col transition-colors duration-300">
+      {/* Context Menu Overlay */}
+      {contextMenu.visible && (
+        <div
+          className="fixed z-50 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:shadow-[0_4px_12px_rgba(0,0,0,0.5)] rounded-lg py-1.5 text-sm text-gray-700 dark:text-zinc-200 outline-none w-48"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => {
+              closeAllTabs();
+              setContextMenu({ ...contextMenu, visible: false });
+            }}
+            className="w-full text-left px-4 py-1.5 hover:bg-gray-100 dark:hover:bg-zinc-700/50 transition-colors"
+          >
+            Close All
+          </button>
+          <button
+            onClick={() => {
+              closeSavedTabs();
+              setContextMenu({ ...contextMenu, visible: false });
+            }}
+            className="w-full text-left px-4 py-1.5 hover:bg-gray-100 dark:hover:bg-zinc-700/50 transition-colors"
+          >
+            Close Saved
+          </button>
+          {contextMenu.tabId && (
+            <button
+              onClick={() => {
+                closeOtherTabs(contextMenu.tabId!);
+                setContextMenu({ ...contextMenu, visible: false });
+              }}
+              className="w-full text-left px-4 py-1.5 hover:bg-gray-100 dark:hover:bg-zinc-700/50 transition-colors"
+            >
+              Close Other
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Header */}
-      <header className="border-b border-gray-200 dark:border-zinc-800 backdrop-blur-sm sticky top-0 z-10 transition-colors duration-300">
+      <header className="border-b border-gray-200 dark:border-zinc-800 backdrop-blur-sm sticky top-0 z-10 flex-shrink-0 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-800 dark:text-zinc-100">
             ZenMarkdown
@@ -362,6 +491,7 @@ function App() {
                       : "border-transparent text-gray-600 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-zinc-200"
                   }`}
                   onClick={() => setActiveTabId(tab.id)}
+                  onContextMenu={(e) => handleTabContextMenu(e, tab.id)}
                 >
                   <span className="text-sm font-medium whitespace-nowrap">
                     {tab.hasUnsavedChanges && <span className="text-blue-600 dark:text-cyan-400 mr-1">●</span>}
@@ -386,40 +516,52 @@ function App() {
         )}
       </header>
 
-      <div className="flex h-[calc(100vh-120px)]">
+      <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 120px)" }}>
         {/* Sidebar */}
         {explorerFiles && (
-          <aside className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-[#121214] overflow-y-auto">
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-zinc-500 truncate" title={explorerRoot || ""}>
-                  {explorerRoot ? explorerRoot.split("\\").pop() || explorerRoot.split("/").pop() : "Explorer"}
-                </h2>
-                <button 
-                  onClick={async () => {
-                    if (explorerRoot && !isRefreshing) {
-                      setIsRefreshing(true);
-                      await refreshTree(explorerRoot, expandedFolders);
-                      setIsRefreshing(false);
-                    }
-                  }}
-                  className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-zinc-800 text-gray-500 transition-all ${isRefreshing ? "animate-spin" : ""}`}
-                  title="Refresh Explorer"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </button>
+          <div className="flex flex-shrink-0 relative group">
+            <aside 
+              className="border-r border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-[#121214] overflow-y-auto"
+              style={{ width: sidebarWidth }}
+            >
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-zinc-500 truncate pr-2 w-full" title={explorerRoot || ""}>
+                    {explorerRoot ? explorerRoot.split("\\").pop() || explorerRoot.split("/").pop() : "Explorer"}
+                  </h2>
+                  <button 
+                    onClick={async () => {
+                      if (explorerRoot && !isRefreshing) {
+                        setIsRefreshing(true);
+                        await refreshTree(explorerRoot, expandedFolders);
+                        setIsRefreshing(false);
+                      }
+                    }}
+                    className={`p-1 flex-shrink-0 rounded hover:bg-gray-200 dark:hover:bg-zinc-800 text-gray-500 transition-all ${isRefreshing ? "animate-spin" : ""}`}
+                    title="Refresh Explorer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="flex flex-col gap-0.5 min-w-max">
+                  {explorerFiles.map((entry, idx) => (
+                    <FileTreeNode key={`${entry.path}-${idx}`} entry={entry} />
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-col gap-0.5">
-                {explorerFiles.map((entry, idx) => (
-                  <FileTreeNode key={`${entry.path}-${idx}`} entry={entry} />
-                ))}
-              </div>
-            </div>
-          </aside>
+            </aside>
+            {/* Resizer Handle */}
+            <div
+              className={`absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/50 z-20 ${
+                isResizing ? "bg-blue-500/50" : "bg-transparent"
+              } transition-colors`}
+              onMouseDown={startResizing}
+            />
+          </div>
         )}
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto w-full">
+        <main className="flex-1 overflow-y-auto w-full min-w-0 bg-white dark:bg-[#09090b]">
           <div className="max-w-5xl mx-auto px-6 py-8">
         {error && (
           <div className="mb-6 p-4 bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-900 rounded-lg">
