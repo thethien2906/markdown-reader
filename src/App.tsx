@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { FolderOpen, File as FileIcon, ChevronRight, ChevronDown, FileText, RefreshCw } from "lucide-react";
+import { Mermaid } from "./Mermaid";
 import "./App.css";
 
 interface FileEntry {
@@ -101,6 +102,27 @@ function App() {
     return () => mediaQuery.removeEventListener("change", handler);
   }, []);
 
+  // Restore last opened folder on mount
+  useEffect(() => {
+    const lastFolder = localStorage.getItem("last_folder_path");
+    if (lastFolder) {
+      setExplorerRoot(lastFolder);
+      invoke("watch_folder", { path: lastFolder })
+        .then(() => {
+          return invoke<FileEntry[]>("get_directory_structure", {
+            path: lastFolder,
+            recursive: false,
+          });
+        })
+        .then(files => {
+          setExplorerFiles(files);
+        })
+        .catch(err => {
+          console.error("Failed to restore last folder:", err);
+        });
+    }
+  }, []);
+
   // Apply dark class to document
   useEffect(() => {
     if (isDark) {
@@ -111,6 +133,19 @@ function App() {
   }, [isDark]);
 
   const activeTab = tabs.find(tab => tab.id === activeTabId);
+
+  // Watch parent directory of the active tab if it's outside explorerRoot
+  useEffect(() => {
+    if (activeTab) {
+      const filePath = activeTab.filePath;
+      const parentDir = filePath.substring(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')));
+      
+      const isInsideRoot = explorerRoot && filePath.toLowerCase().startsWith(explorerRoot.toLowerCase());
+      if (!isInsideRoot) {
+        invoke("watch_folder", { path: parentDir }).catch(err => console.error("Error watching file parent:", err));
+      }
+    }
+  }, [activeTabId, explorerRoot, activeTab]);
 
   function getFileTypeLabel(fileName: string): string {
     const ext = fileName.split('.').pop()?.toLowerCase();
@@ -130,8 +165,10 @@ function App() {
       let selectedPath = filePath;
       
       if (!selectedPath) {
+        const lastFolder = localStorage.getItem("last_folder_path") || undefined;
         const selected = await open({
           multiple: false,
+          defaultPath: lastFolder,
           filters: [
             {
               name: "Text Files",
@@ -141,6 +178,8 @@ function App() {
         });
         if (selected && typeof selected === "string") {
           selectedPath = selected;
+          const parentDir = selectedPath.substring(0, Math.max(selectedPath.lastIndexOf('/'), selectedPath.lastIndexOf('\\')));
+          localStorage.setItem("last_folder_path", parentDir);
         } else {
           return; // Cancelled
         }
@@ -210,9 +249,38 @@ function App() {
     let unlisten: any;
     
     async function setupListener() {
-      unlisten = await listen("fs-update", () => {
+      unlisten = await listen<string[]>("fs-update", (event) => {
         if (explorerRoot) {
           refreshTree(explorerRoot, expandedFolders);
+        }
+        
+        const modifiedPaths = event.payload;
+        if (Array.isArray(modifiedPaths) && activeTabId) {
+          const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+          
+          setTabs(prevTabs => {
+            const currentActiveTab = prevTabs.find(t => t.id === activeTabId);
+            if (currentActiveTab) {
+              const activeNormalized = normalize(currentActiveTab.filePath);
+              const isModified = modifiedPaths.some(p => normalize(p) === activeNormalized);
+              
+              if (isModified) {
+                // Auto-reload only if in preview mode OR in edit mode with no unsaved changes
+                if (!currentActiveTab.isEditMode || !currentActiveTab.hasUnsavedChanges) {
+                  invoke<string>("read_file_content", { path: currentActiveTab.filePath })
+                    .then(newContent => {
+                      setTabs(prev => prev.map(t => 
+                        t.id === activeTabId 
+                          ? { ...t, content: newContent, hasUnsavedChanges: false } 
+                          : t
+                      ));
+                    })
+                    .catch(err => console.error("Failed to auto-reload file:", err));
+                }
+              }
+            }
+            return prevTabs;
+          });
         }
       });
     }
@@ -221,16 +289,19 @@ function App() {
     return () => {
       if (unlisten) unlisten();
     };
-  }, [explorerRoot, expandedFolders, refreshTree]);
+  }, [explorerRoot, expandedFolders, refreshTree, activeTabId]);
 
   async function openFolder() {
     try {
+      const lastFolder = localStorage.getItem("last_folder_path") || undefined;
       const selected = await open({
         directory: true,
         multiple: false,
+        defaultPath: lastFolder,
       });
 
       if (selected && typeof selected === "string") {
+        localStorage.setItem("last_folder_path", selected);
         setExplorerRoot(selected);
         setExpandedFolders(new Set()); // Reset expansions when opening new folder
         
@@ -649,10 +720,14 @@ function App() {
                   components={{
                     code({ node, inline, className, children, ...props }: any) {
                       const match = /language-(\w+)/.exec(className || "");
+                      const language = match ? match[1] : "";
+                      if (!inline && language === "mermaid") {
+                        return <Mermaid code={String(children).replace(/\n$/, "")} isDark={isDark} />;
+                      }
                       return !inline && match ? (
                         <SyntaxHighlighter
                           style={oneDark}
-                          language={match[1]}
+                          language={language}
                           PreTag="div"
                           {...props}
                         >

@@ -1,10 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
-use std::sync::{Mutex};
-use tauri::{AppHandle, Emitter, Manager, State};
-use notify::{Watcher, RecursiveMode, Event, Config};
-use std::time::Duration;
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, State};
+use notify::{Watcher, RecursiveMode, Event};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -88,7 +87,10 @@ fn watch_folder(app_handle: AppHandle, state: State<'_, WatcherState>, path: Str
                 // If anything changed, notify frontend
                 // VS Code uses a small debounce, we'll emit the event and let frontend handle refresh
                 if event.kind.is_modify() || event.kind.is_create() || event.kind.is_remove() {
-                    let _ = app_handle_clone.emit("fs-update", ());
+                    let paths: Vec<String> = event.paths.iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect();
+                    let _ = app_handle_clone.emit("fs-update", paths);
                 }
             }
             Err(e) => println!("watch error: {:?}", e),
