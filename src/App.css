@@ -341,4 +341,188 @@ html.dark header {
   margin-right: 0.5rem;
 }
 
+/* Beautiful Print & Export PDF styles */
+@media print {
+  /* Reset document defaults for print layout */
+  html, body {
+    background-color: #FFFFFF !important;
+    background: #FFFFFF !important;
+    color: #111111 !important;
+    font-size: 12pt !important;
+    line-height: 1.6 !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif !important;
+  }
+
+  /* Reset layout constraints to prevent print clipping and truncation */
+  .min-h-screen,
+  .flex,
+  .flex-col,
+  main,
+  div[style*="height"] {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+    position: static !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Main container styles */
+  .markdown-content {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  /* Layout and page break optimization for headings */
+  h1, h2, h3, h4, h5, h6 {
+    color: #111111 !important;
+    page-break-after: avoid;
+    page-break-inside: avoid;
+    font-weight: 700 !important;
+  }
+
+  h1 {
+    font-size: 24pt !important;
+    margin-top: 0 !important;
+    margin-bottom: 12pt !important;
+  }
+
+  h2 {
+    font-size: 18pt !important;
+    margin-top: 24pt !important;
+    margin-bottom: 8pt !important;
+    border-bottom: 1px solid #E5E7EB !important;
+    padding-bottom: 4pt !important;
+  }
+
+  h3 {
+    font-size: 14pt !important;
+    margin-top: 18pt !important;
+    margin-bottom: 6pt !important;
+  }
+
+  /* Standard text layout */
+  p, li {
+    font-size: 11pt !important;
+    color: #222222 !important;
+    orphans: 3;
+    widows: 3;
+  }
+
+  li {
+    margin-bottom: 4pt !important;
+  }
+
+  /* Print code blocks cleanly */
+  pre, 
+  .markdown-content pre {
+    background-color: #F9FAFB !important;
+    background: #F9FAFB !important;
+    border: 1px solid #E5E7EB !important;
+    box-shadow: none !important;
+    padding: 10pt !important;
+    border-radius: 4px !important;
+    page-break-inside: avoid !important;
+    overflow-x: auto !important;
+    margin: 12pt 0 !important;
+  }
+
+  code,
+  .markdown-content :not(pre) > code {
+    background-color: #F3F4F6 !important;
+    background: #F3F4F6 !important;
+    color: #B80056 !important;
+    padding: 2px 4px !important;
+    border-radius: 3px !important;
+    font-size: 9.5pt !important;
+  }
+
+  pre code {
+    background-color: transparent !important;
+    color: #111111 !important;
+    font-size: 9.5pt !important;
+  }
+
+  /* Blockquotes styling for print */
+  blockquote,
+  .markdown-content blockquote {
+    background-color: #F9FAFB !important;
+    background: #F9FAFB !important;
+    border-left: 3px solid #3B82F6 !important;
+    padding: 8pt 12pt !important;
+    margin: 12pt 0 !important;
+    page-break-inside: avoid !important;
+    border-radius: 0 4px 4px 0 !important;
+  }
+
+  blockquote p {
+    color: #444444 !important;
+    font-style: italic !important;
+    margin: 0 !important;
+  }
+
+  /* Tables layout for print */
+  table,
+  .markdown-content table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+    margin: 16pt 0 !important;
+    page-break-inside: avoid !important;
+    box-shadow: none !important;
+    border: 1px solid #E5E7EB !important;
+  }
+
+  th,
+  .markdown-content th {
+    background-color: #F3F4F6 !important;
+    background: #F3F4F6 !important;
+    border-bottom: 2px solid #D1D5DB !important;
+    padding: 6pt 8pt !important;
+    font-weight: 600 !important;
+    color: #111111 !important;
+  }
+
+  td,
+  .markdown-content td {
+    border-top: 1px solid #E5E7EB !important;
+    padding: 6pt 8pt !important;
+    color: #222222 !important;
+  }
+
+  /* Clean up images */
+  img,
+  .markdown-content img {
+    max-width: 100% !important;
+    height: auto !important;
+    page-break-inside: avoid !important;
+    box-shadow: none !important;
+    margin: 12pt auto !important;
+    display: block !important;
+  }
+
+  /* Mermaid diagram formatting */
+  .mermaid-container {
+    background-color: #FFFFFF !important;
+    background: #FFFFFF !important;
+    border: 1px solid #E5E7EB !important;
+    box-shadow: none !important;
+    margin: 16pt 0 !important;
+    padding: 8pt !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Links style */
+  a {
+    color: #111111 !important;
+    text-decoration: underline !important;
+  }
+}
+
 

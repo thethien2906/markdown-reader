@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { FolderOpen, File as FileIcon, ChevronRight, ChevronDown, FileText, RefreshCw } from "lucide-react";
 import { Mermaid } from "./Mermaid";
 import "./App.css";
@@ -26,6 +26,47 @@ interface Tab {
   hasUnsavedChanges: boolean;
 }
 
+interface MarkdownViewerProps {
+  content: string;
+  isDark: boolean;
+  isPrint?: boolean;
+}
+
+function MarkdownViewer({ content, isDark, isPrint = false }: MarkdownViewerProps) {
+  return (
+    <article className={`markdown-content ${isPrint ? "" : "print:block"}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          code({ node, inline, className, children, ...props }: any) {
+            const match = /language-(\w+)/.exec(className || "");
+            const language = match ? match[1] : "";
+            if (!inline && language === "mermaid") {
+              return <Mermaid code={String(children).replace(/\n$/, "")} isDark={isPrint ? false : isDark} />;
+            }
+            return !inline && match ? (
+              <SyntaxHighlighter
+                style={isPrint ? oneLight : (isDark ? oneDark : oneLight)}
+                language={language}
+                PreTag="div"
+                {...props}
+              >
+                {String(children).replace(/\n$/, "")}
+              </SyntaxHighlighter>
+            ) : (
+              <code className={className} {...props}>
+                {children}
+              </code>
+            );
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </article>
+  );
+}
+
 function App() {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -35,6 +76,7 @@ function App() {
   const [explorerRoot, setExplorerRoot] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Layout states
   const [sidebarWidth, setSidebarWidth] = useState(256);
@@ -478,8 +520,123 @@ function App() {
     }
   }
 
+  async function exportPdf() {
+    if (!activeTab) return;
+    
+    setIsExporting(true);
+    setError("");
+    
+    const wasDark = document.documentElement.classList.contains("dark");
+    
+    try {
+      // Temporarily remove dark class to force light mode styles in html2canvas rendering
+      if (wasDark) {
+        document.documentElement.classList.remove("dark");
+      }
+      
+      // Wait 350ms to allow React to render the visible element and browser to complete layout/paint
+      await new Promise((resolve) => setTimeout(resolve, 350));
+
+      const element = document.getElementById("pdf-export-content");
+      if (!element) {
+        throw new Error("Export container not found");
+      }
+
+      // Load html2canvas and jsPDF dynamically
+      // @ts-ignore
+      const html2canvas = (await import("html2canvas")).default;
+      // @ts-ignore
+      const { jsPDF } = await import("jspdf");
+
+      // Render canvas
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        scrollX: 0,
+        scrollY: 0
+      });
+
+      // PDF layout specifications (A4)
+      const margin = 15;
+      const pdf = new jsPDF("p", "mm", "a4");
+      const pageWidth = pdf.internal.pageSize.getWidth(); // 210mm
+      const pageHeight = pdf.internal.pageSize.getHeight(); // 297mm
+      
+      const printableWidth = pageWidth - 2 * margin; // 180mm
+      const printableHeight = pageHeight - 2 * margin; // 267mm
+      
+      const canvasWidth = canvas.width;
+      const canvasHeight = canvas.height;
+      
+      // Height of one page slice in canvas pixels
+      const sliceHeightPixels = Math.floor(canvasWidth * (printableHeight / printableWidth));
+      
+      let sourceY = 0;
+      let pageNum = 0;
+      
+      while (sourceY < canvasHeight) {
+        if (pageNum > 0) {
+          pdf.addPage();
+        }
+        
+        // Create a temporary canvas for this slice
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvasWidth;
+        const currentSliceHeight = Math.min(sliceHeightPixels, canvasHeight - sourceY);
+        sliceCanvas.height = currentSliceHeight;
+        
+        const ctx = sliceCanvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(
+            canvas,
+            0, sourceY, canvasWidth, currentSliceHeight, // Source rect
+            0, 0, canvasWidth, currentSliceHeight // Destination rect
+          );
+        }
+        
+        // Compress as JPEG to optimize size
+        const sliceImgData = sliceCanvas.toDataURL("image/jpeg", 0.95);
+        
+        // Map height to PDF mm unit
+        const destHeight = (currentSliceHeight * printableWidth) / canvasWidth;
+        
+        pdf.addImage(sliceImgData, "JPEG", margin, margin, printableWidth, destHeight);
+        
+        sourceY += sliceHeightPixels;
+        pageNum++;
+      }
+      
+      const pdfArrayBuffer = pdf.output("arraybuffer");
+      const uint8Array = new Uint8Array(pdfArrayBuffer);
+      
+      const defaultName = activeTab.fileName.replace(/\.(md|markdown|txt)$/i, "") + ".pdf";
+      const filePath = await save({
+        filters: [{ name: "PDF Document", extensions: ["pdf"] }],
+        defaultPath: defaultName
+      });
+      
+      if (filePath) {
+        await invoke("write_binary_file", { 
+          path: filePath, 
+          content: Array.from(uint8Array) 
+        });
+      }
+    } catch (err: any) {
+      console.error("Export PDF error:", err);
+      const errorMessage = err?.message || String(err);
+      setError(`Failed to export PDF: ${errorMessage}`);
+    } finally {
+      // Restore document styles and class
+      if (wasDark) {
+        document.documentElement.classList.add("dark");
+      }
+      setIsExporting(false);
+    }
+  }
+
   return (
-    <div className="min-h-screen flex flex-col transition-colors duration-300">
+    <div className="min-h-screen flex flex-col transition-colors duration-300 print:min-h-0 print:block relative z-10 bg-[#FAFAFA] dark:bg-[#18181B]">
       {/* Context Menu Overlay */}
       {contextMenu.visible && (
         <div
@@ -520,7 +677,7 @@ function App() {
       )}
 
       {/* Header */}
-      <header className="border-b border-gray-200 dark:border-zinc-800 backdrop-blur-sm sticky top-0 z-10 flex-shrink-0 transition-colors duration-300">
+      <header className="border-b border-gray-200 dark:border-zinc-800 backdrop-blur-sm sticky top-0 z-10 flex-shrink-0 transition-colors duration-300 print:hidden">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-800 dark:text-zinc-100">
             ZenMarkdown
@@ -587,10 +744,10 @@ function App() {
         )}
       </header>
 
-      <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100vh - 120px)" }}>
+      <div className="flex flex-1 overflow-hidden print:h-auto print:overflow-visible print:block" style={{ height: "calc(100vh - 120px)" }}>
         {/* Sidebar */}
         {explorerFiles && (
-          <div className="flex flex-shrink-0 relative group">
+          <div className="flex flex-shrink-0 relative group print:hidden">
             <aside 
               className="border-r border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-[#121214] overflow-y-auto"
               style={{ width: sidebarWidth }}
@@ -632,8 +789,8 @@ function App() {
         )}
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto w-full min-w-0 bg-white dark:bg-[#09090b]">
-          <div className="max-w-5xl mx-auto px-6 py-8">
+        <main className="flex-1 overflow-y-auto w-full min-w-0 bg-white dark:bg-[#09090b] print:h-auto print:overflow-visible print:p-0 print:bg-white">
+          <div className="max-w-5xl mx-auto px-6 py-8 print:p-0 print:max-w-full">
         {error && (
           <div className="mb-6 p-4 bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-900 rounded-lg">
             <p className="text-red-700 dark:text-red-300">{error}</p>
@@ -643,7 +800,7 @@ function App() {
         {activeTab ? (
           <>
             {/* Tab Controls */}
-            <div className="mb-8 pb-4 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between">
+            <div className="mb-8 pb-4 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between print:hidden">
               <p className="text-sm text-gray-600 dark:text-zinc-400">
                 <span className="font-medium text-gray-800 dark:text-zinc-200">{getFileTypeLabel(activeTab.fileName)}</span>
                 {activeTab.hasUnsavedChanges && (
@@ -678,6 +835,28 @@ function App() {
                   Reload
                 </button>
                 <button
+                  onClick={exportPdf}
+                  disabled={isExporting}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    isExporting
+                      ? "bg-gray-200 dark:bg-zinc-800 text-gray-400 dark:text-zinc-600 cursor-not-allowed"
+                      : "bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 hover:bg-gray-200 dark:hover:bg-zinc-700"
+                  }`}
+                  title="Export directly to PDF"
+                >
+                  {isExporting ? (
+                    <svg className="w-4 h-4 animate-spin text-gray-500" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                  )}
+                  {isExporting ? "Exporting..." : "Export PDF"}
+                </button>
+                <button
                   onClick={() => toggleEditMode(activeTab.id)}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium ${
                     activeTab.isEditMode
@@ -707,43 +886,17 @@ function App() {
 
             {/* Content Area */}
             {activeTab.isEditMode ? (
-              <textarea
-                value={activeTab.content}
-                onChange={(e) => updateTabContent(activeTab.id, e.target.value)}
-                className="w-full min-h-[600px] p-4 bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-800 dark:text-zinc-200 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-cyan-500 resize-vertical"
-                spellCheck={false}
-              />
+              <>
+                <textarea
+                  value={activeTab.content}
+                  onChange={(e) => updateTabContent(activeTab.id, e.target.value)}
+                  className="w-full min-h-[600px] p-4 bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-800 dark:text-zinc-200 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-cyan-500 resize-vertical print:hidden"
+                  spellCheck={false}
+                />
+                <MarkdownViewer content={activeTab.content} isDark={isDark} isPrint={true} />
+              </>
             ) : (
-              <article className="markdown-content">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    code({ node, inline, className, children, ...props }: any) {
-                      const match = /language-(\w+)/.exec(className || "");
-                      const language = match ? match[1] : "";
-                      if (!inline && language === "mermaid") {
-                        return <Mermaid code={String(children).replace(/\n$/, "")} isDark={isDark} />;
-                      }
-                      return !inline && match ? (
-                        <SyntaxHighlighter
-                          style={oneDark}
-                          language={language}
-                          PreTag="div"
-                          {...props}
-                        >
-                          {String(children).replace(/\n$/, "")}
-                        </SyntaxHighlighter>
-                      ) : (
-                        <code className={className} {...props}>
-                          {children}
-                        </code>
-                      );
-                    },
-                  }}
-                >
-                  {activeTab.content}
-                </ReactMarkdown>
-              </article>
+              <MarkdownViewer content={activeTab.content} isDark={isDark} />
             )}
           </>
         ) : (
@@ -772,6 +925,36 @@ function App() {
           </div>
         </main>
       </div>
+      {/* Offscreen container for PDF export */}
+      {activeTab && (
+        <div 
+          id="pdf-export-content" 
+          style={{ 
+            display: isExporting ? 'block' : 'none',
+            position: 'absolute',
+            top: '0',
+            left: '0',
+            width: '794px',
+            zIndex: 999998,
+            background: '#ffffff',
+            color: '#111111',
+            padding: '40px',
+            boxSizing: 'border-box',
+            height: 'auto',
+            overflow: 'visible'
+          }}
+        >
+          <MarkdownViewer content={activeTab.content} isDark={false} isPrint={true} />
+        </div>
+      )}
+      {/* Fullscreen loading overlay during PDF export */}
+      {isExporting && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[999999] flex flex-col items-center justify-center text-white gap-4">
+          <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+          <p className="font-semibold text-lg">Generating PDF...</p>
+          <p className="text-sm text-white/70">Please wait, formatting layout...</p>
+        </div>
+      )}
     </div>
   );
 }

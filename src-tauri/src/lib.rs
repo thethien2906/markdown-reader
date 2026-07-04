@@ -116,6 +116,11 @@ fn write_file_content(path: String, content: String) -> Result<(), String> {
     fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))
 }
 
+#[tauri::command]
+fn write_binary_file(path: String, content: Vec<u8>) -> Result<(), String> {
+    fs::write(&path, content).map_err(|e| format!("Failed to write binary file: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -125,6 +130,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_file_content, 
             write_file_content, 
+            write_binary_file,
             get_directory_structure,
             watch_folder
         ])
