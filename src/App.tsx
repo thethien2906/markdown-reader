@@ -6,8 +6,15 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { FolderOpen, File as FileIcon, ChevronRight, ChevronDown, FileText, RefreshCw } from "lucide-react";
+import { FolderOpen, File as FileIcon, ChevronRight, ChevronDown, FileText, RefreshCw, Copy, Check, Image as ImageIcon, FileCode, Sparkles } from "lucide-react";
 import { Mermaid } from "./Mermaid";
+import { JsonViewer } from "./JsonViewer";
+import { YamlViewer } from "./YamlViewer";
+import { HtmlViewer } from "./HtmlViewer";
+import { ImageViewer } from "./ImageViewer";
+import { PdfViewer } from "./PdfViewer";
+import { CodeViewer } from "./CodeViewer";
+import JSON5 from "json5";
 import "./App.css";
 
 interface FileEntry {
@@ -77,6 +84,8 @@ function App() {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [isJsonCompact, setIsJsonCompact] = useState(false);
 
   // Layout states
   const [sidebarWidth, setSidebarWidth] = useState(256);
@@ -189,16 +198,124 @@ function App() {
     }
   }, [activeTabId, explorerRoot, activeTab]);
 
+  // Reset copied and JSON compact state on tab switch
+  useEffect(() => {
+    setIsCopied(false);
+    setIsJsonCompact(false);
+  }, [activeTabId]);
+
+  function getFileName(filePath: string): string {
+    const clean = filePath.replace(/[/\\]+$/, "");
+    return clean.split(/[/\\]/).pop() || clean || "Untitled";
+  }
+
+  type FileCategory = 'markdown' | 'json' | 'yaml' | 'html' | 'image' | 'pdf' | 'text';
+
+  function getFileCategory(fileName: string): FileCategory {
+    const ext = fileName.split('.').pop()?.toLowerCase() || '';
+    if (['md', 'markdown'].includes(ext)) return 'markdown';
+    if (ext === 'json') return 'json';
+    if (['yml', 'yaml'].includes(ext)) return 'yaml';
+    if (['html', 'htm'].includes(ext)) return 'html';
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) return 'image';
+    if (ext === 'pdf') return 'pdf';
+    return 'text';
+  }
+
+  function getMimeType(fileName: string): string {
+    const ext = fileName.split('.').pop()?.toLowerCase() || '';
+    switch (ext) {
+      case 'png': return 'image/png';
+      case 'jpg':
+      case 'jpeg': return 'image/jpeg';
+      case 'gif': return 'image/gif';
+      case 'webp': return 'image/webp';
+      case 'svg': return 'image/svg+xml';
+      case 'bmp': return 'image/bmp';
+      case 'ico': return 'image/x-icon';
+      case 'pdf': return 'application/pdf';
+      case 'json': return 'application/json';
+      case 'html':
+      case 'htm': return 'text/html';
+      case 'md':
+      case 'markdown': return 'text/markdown';
+      case 'yml':
+      case 'yaml': return 'text/yaml';
+      default: return 'text/plain';
+    }
+  }
+
   function getFileTypeLabel(fileName: string): string {
-    const ext = fileName.split('.').pop()?.toLowerCase();
+    const ext = fileName.split('.').pop()?.toLowerCase() || '';
     switch (ext) {
       case 'md':
       case 'markdown':
         return 'Markdown';
+      case 'json':
+        return 'JSON';
+      case 'yml':
+      case 'yaml':
+        return 'YAML';
+      case 'html':
+      case 'htm':
+        return 'HTML';
+      case 'pdf':
+        return 'PDF';
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'gif':
+      case 'webp':
+      case 'svg':
+      case 'bmp':
+      case 'ico':
+        return ext === 'svg' ? 'SVG Image' : `${ext.toUpperCase()} Image`;
       case 'txt':
         return 'Text';
       default:
         return ext ? ext.toUpperCase() : 'File';
+    }
+  }
+
+  const activeCategory = activeTab ? getFileCategory(activeTab.fileName) : null;
+  const isBinaryTab = activeCategory === "pdf" || (activeCategory === "image" && !activeTab?.fileName.toLowerCase().endsWith(".svg"));
+
+  function renderTabContent(tab: Tab, isDarkMode: boolean, isPrint = false) {
+    const category = getFileCategory(tab.fileName);
+    switch (category) {
+      case "markdown":
+        return <MarkdownViewer content={tab.content} isDark={isDarkMode} isPrint={isPrint} />;
+      case "json":
+        return <JsonViewer content={tab.content} isDark={isDarkMode} isPrint={isPrint} isCompact={isJsonCompact} />;
+      case "yaml":
+        return <YamlViewer content={tab.content} isDark={isDarkMode} isPrint={isPrint} />;
+      case "html":
+        return <HtmlViewer content={tab.content} isDark={isDarkMode} isPrint={isPrint} />;
+      case "image":
+        return (
+          <ImageViewer
+            src={
+              tab.fileName.toLowerCase().endsWith(".svg")
+                ? `data:image/svg+xml;utf8,${encodeURIComponent(tab.content)}`
+                : `data:${getMimeType(tab.fileName)};base64,${tab.content}`
+            }
+            fileName={tab.fileName}
+            isDark={isDarkMode}
+            isPrint={isPrint}
+          />
+        );
+      case "pdf":
+        return <PdfViewer base64Data={tab.content} isDark={isDarkMode} isPrint={isPrint} />;
+      default:
+        return (
+          <CodeViewer
+            content={tab.content}
+            language="text"
+            isDark={isDarkMode}
+            isPrint={isPrint}
+            showLineNumbers={true}
+          />
+        );
     }
   }
 
@@ -213,8 +330,43 @@ function App() {
           defaultPath: lastFolder,
           filters: [
             {
-              name: "Text Files",
-              extensions: ["md", "markdown", "txt"],
+              name: "All Supported Files",
+              extensions: [
+                "md", "markdown", "txt",
+                "json",
+                "yml", "yaml",
+                "html", "htm",
+                "pdf",
+                "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"
+              ],
+            },
+            {
+              name: "Markdown Files",
+              extensions: ["md", "markdown"],
+            },
+            {
+              name: "JSON Files",
+              extensions: ["json"],
+            },
+            {
+              name: "YAML Files",
+              extensions: ["yml", "yaml"],
+            },
+            {
+              name: "HTML Files",
+              extensions: ["html", "htm"],
+            },
+            {
+              name: "PDF Documents",
+              extensions: ["pdf"],
+            },
+            {
+              name: "Images",
+              extensions: ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"],
+            },
+            {
+              name: "All Files",
+              extensions: ["*"],
             },
           ],
         });
@@ -234,11 +386,14 @@ function App() {
         return;
       }
 
-      const content = await invoke<string>("read_file_content", {
-        path: selectedPath,
-      });
+      const fileName = getFileName(selectedPath);
+      const category = getFileCategory(fileName);
+      const isBinary = category === "pdf" || (category === "image" && !fileName.toLowerCase().endsWith(".svg"));
+
+      const content = isBinary
+        ? await invoke<string>("read_file_base64", { path: selectedPath })
+        : await invoke<string>("read_file_content", { path: selectedPath });
       
-      const fileName = selectedPath.split("\\").pop() || selectedPath.split("/").pop() || "Untitled";
       const newTab: Tab = {
         id: Date.now().toString(),
         fileName,
@@ -309,7 +464,13 @@ function App() {
               if (isModified) {
                 // Auto-reload only if in preview mode OR in edit mode with no unsaved changes
                 if (!currentActiveTab.isEditMode || !currentActiveTab.hasUnsavedChanges) {
-                  invoke<string>("read_file_content", { path: currentActiveTab.filePath })
+                  const category = getFileCategory(currentActiveTab.fileName);
+                  const isBinary = category === "pdf" || (category === "image" && !currentActiveTab.fileName.toLowerCase().endsWith(".svg"));
+                  const reloadPromise = isBinary
+                    ? invoke<string>("read_file_base64", { path: currentActiveTab.filePath })
+                    : invoke<string>("read_file_content", { path: currentActiveTab.filePath });
+
+                  reloadPromise
                     .then(newContent => {
                       setTabs(prev => prev.map(t => 
                         t.id === activeTabId 
@@ -383,7 +544,6 @@ function App() {
 
   const FileTreeNode = ({ entry, depth = 0 }: { entry: FileEntry, depth?: number }) => {
     const isExpanded = expandedFolders.has(entry.path);
-    const isMd = entry.name.toLowerCase().endsWith('.md') || entry.name.toLowerCase().endsWith('.markdown');
 
     if (entry.is_dir) {
       return (
@@ -408,6 +568,14 @@ function App() {
       );
     }
 
+    const ext = entry.name.split('.').pop()?.toLowerCase() || '';
+    const isMd = ['md', 'markdown'].includes(ext);
+    const isJson = ext === 'json';
+    const isYaml = ['yml', 'yaml'].includes(ext);
+    const isHtml = ['html', 'htm'].includes(ext);
+    const isPdf = ext === 'pdf';
+    const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext);
+
     return (
       <div 
         className="flex items-center gap-1.5 py-1 px-2 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded cursor-pointer text-gray-600 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-zinc-200 text-sm select-none"
@@ -416,6 +584,16 @@ function App() {
       >
         {isMd ? (
           <FileText className="w-4 h-4 text-green-600 dark:text-green-400 opacity-80" />
+        ) : isJson ? (
+          <FileCode className="w-4 h-4 text-amber-500 dark:text-amber-400 opacity-80" />
+        ) : isYaml ? (
+          <FileCode className="w-4 h-4 text-purple-500 dark:text-purple-400 opacity-80" />
+        ) : isHtml ? (
+          <FileCode className="w-4 h-4 text-orange-500 dark:text-orange-400 opacity-80" />
+        ) : isPdf ? (
+          <FileText className="w-4 h-4 text-red-500 dark:text-red-400 opacity-80" />
+        ) : isImg ? (
+          <ImageIcon className="w-4 h-4 text-blue-500 dark:text-cyan-400 opacity-80" />
         ) : (
           <FileIcon className="w-4 h-4 text-gray-400 opacity-80" />
         )}
@@ -498,6 +676,119 @@ function App() {
     }
   }
 
+  async function copyActiveTabContent() {
+    if (!activeTab) return;
+    const category = getFileCategory(activeTab.fileName);
+
+    if (category === "image" && !activeTab.fileName.toLowerCase().endsWith(".svg")) {
+      try {
+        const mime = getMimeType(activeTab.fileName);
+        const dataUrl = `data:${mime};base64,${activeTab.content}`;
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        if (blob.type === "image/png") {
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        } else {
+          const img = new Image();
+          img.src = dataUrl;
+          await new Promise((resolve) => {
+            img.onload = resolve;
+          });
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext("2d");
+          ctx?.drawImage(img, 0, 0);
+          await new Promise<void>((resolve, reject) => {
+            canvas.toBlob(async (pngBlob) => {
+              if (pngBlob) {
+                try {
+                  await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob })]);
+                  resolve();
+                } catch (e) {
+                  reject(e);
+                }
+              } else {
+                reject(new Error("Canvas toBlob failed"));
+              }
+            }, "image/png");
+          });
+        }
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+        return;
+      } catch (imgErr) {
+        console.warn("Clipboard image write failed, copying path instead:", imgErr);
+        await navigator.clipboard.writeText(activeTab.filePath);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+        return;
+      }
+    }
+
+    if (category === "pdf") {
+      try {
+        await navigator.clipboard.writeText(activeTab.filePath);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+        return;
+      } catch (err: any) {
+        setError(`Failed to copy path: ${err?.message || err}`);
+        return;
+      }
+    }
+
+    if (category === "json") {
+      try {
+        let parsed: any;
+        try {
+          parsed = JSON.parse(activeTab.content);
+        } catch {
+          parsed = JSON5.parse(activeTab.content);
+        }
+        const textToCopy = isJsonCompact ? JSON.stringify(parsed) : activeTab.content;
+        await navigator.clipboard.writeText(textToCopy);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+        return;
+      } catch {
+        // Fallback to raw content if invalid JSON
+      }
+    }
+
+    // Text content (Markdown, JSON, YAML, HTML, SVG, TXT)
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(activeTab.content);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch {
+      try {
+        const textArea = document.createElement("textarea");
+        textArea.value = activeTab.content;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand("copy");
+        document.body.removeChild(textArea);
+        if (successful) {
+          setIsCopied(true);
+          setTimeout(() => setIsCopied(false), 2000);
+        } else {
+          setError("Failed to copy content to clipboard");
+        }
+      } catch (err: any) {
+        setError(`Failed to copy content: ${err?.message || err}`);
+      }
+    }
+  }
+
   async function reloadActiveTab() {
     if (!activeTabId || !activeTab) return;
 
@@ -507,9 +798,11 @@ function App() {
     }
 
     try {
-      const content = await invoke<string>("read_file_content", {
-        path: activeTab.filePath,
-      });
+      const category = getFileCategory(activeTab.fileName);
+      const isBinary = category === "pdf" || (category === "image" && !activeTab.fileName.toLowerCase().endsWith(".svg"));
+      const content = isBinary
+        ? await invoke<string>("read_file_base64", { path: activeTab.filePath })
+        : await invoke<string>("read_file_content", { path: activeTab.filePath });
       
       setTabs(tabs.map(tab => 
         tab.id === activeTabId ? { ...tab, content, hasUnsavedChanges: false } : tab
@@ -713,6 +1006,7 @@ function App() {
               {tabs.map(tab => (
                 <div
                   key={tab.id}
+                  title={tab.filePath}
                   className={`flex items-center gap-2 px-4 py-2 border-b-2 transition-colors cursor-pointer ${
                     activeTabId === tab.id
                       ? "border-blue-600 dark:border-cyan-500 text-gray-900 dark:text-zinc-100"
@@ -755,7 +1049,7 @@ function App() {
               <div className="p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-zinc-500 truncate pr-2 w-full" title={explorerRoot || ""}>
-                    {explorerRoot ? explorerRoot.split("\\").pop() || explorerRoot.split("/").pop() : "Explorer"}
+                    {explorerRoot ? getFileName(explorerRoot) : "Explorer"}
                   </h2>
                   <button 
                     onClick={async () => {
@@ -800,13 +1094,18 @@ function App() {
         {activeTab ? (
           <>
             {/* Tab Controls */}
-            <div className="mb-8 pb-4 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between print:hidden">
-              <p className="text-sm text-gray-600 dark:text-zinc-400">
-                <span className="font-medium text-gray-800 dark:text-zinc-200">{getFileTypeLabel(activeTab.fileName)}</span>
+            <div className="sticky top-0 bg-white/95 dark:bg-[#09090b]/95 backdrop-blur-sm z-20 pt-1 pb-4 mb-6 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between print:hidden">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-gray-800 dark:text-zinc-200" title={activeTab.filePath}>
+                  {activeTab.fileName}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-zinc-800 text-gray-500 dark:text-zinc-400">
+                  {getFileTypeLabel(activeTab.fileName)}
+                </span>
                 {activeTab.hasUnsavedChanges && (
-                  <span className="ml-2 text-xs text-blue-600 dark:text-cyan-400">(unsaved)</span>
+                  <span className="text-xs text-blue-600 dark:text-cyan-400">(unsaved)</span>
                 )}
-              </p>
+              </div>
               <div className="flex items-center gap-2">
                 {activeTab.isEditMode && (
                   <button
@@ -824,6 +1123,43 @@ function App() {
                     Save
                   </button>
                 )}
+                {activeCategory === "json" && !activeTab.isEditMode && (
+                  <button
+                    onClick={() => setIsJsonCompact(!isJsonCompact)}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 hover:bg-gray-200 dark:hover:bg-zinc-700"
+                    title={isJsonCompact ? "Prettify JSON with indentation" : "Compact JSON into single-line"}
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    {isJsonCompact ? "Prettify" : "Compact"}
+                  </button>
+                )}
+                <button
+                  onClick={copyActiveTabContent}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    isCopied
+                      ? "bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-400 border border-green-300 dark:border-green-800"
+                      : "bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 hover:bg-gray-200 dark:hover:bg-zinc-700"
+                  }`}
+                  title={
+                    activeCategory === "image"
+                      ? "Copy image to clipboard"
+                      : activeCategory === "pdf"
+                      ? "Copy file path to clipboard"
+                      : "Copy content to clipboard"
+                  }
+                >
+                  {isCopied ? (
+                    <>
+                      <Check className="w-4 h-4 text-green-600 dark:text-green-400" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      Copy
+                    </>
+                  )}
+                </button>
                 <button
                   onClick={reloadActiveTab}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors text-sm font-medium"
@@ -834,58 +1170,62 @@ function App() {
                   </svg>
                   Reload
                 </button>
-                <button
-                  onClick={exportPdf}
-                  disabled={isExporting}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    isExporting
-                      ? "bg-gray-200 dark:bg-zinc-800 text-gray-400 dark:text-zinc-600 cursor-not-allowed"
-                      : "bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 hover:bg-gray-200 dark:hover:bg-zinc-700"
-                  }`}
-                  title="Export directly to PDF"
-                >
-                  {isExporting ? (
-                    <svg className="w-4 h-4 animate-spin text-gray-500" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                    </svg>
-                  )}
-                  {isExporting ? "Exporting..." : "Export PDF"}
-                </button>
-                <button
-                  onClick={() => toggleEditMode(activeTab.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium ${
-                    activeTab.isEditMode
-                      ? "bg-blue-100 dark:bg-cyan-900/30 text-blue-700 dark:text-cyan-400"
-                      : "bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 hover:bg-gray-200 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  {activeTab.isEditMode ? (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                    Preview
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                    Edit
-                  </>
+                {activeCategory !== "pdf" && (
+                  <button
+                    onClick={exportPdf}
+                    disabled={isExporting}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      isExporting
+                        ? "bg-gray-200 dark:bg-zinc-800 text-gray-400 dark:text-zinc-600 cursor-not-allowed"
+                        : "bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 hover:bg-gray-200 dark:hover:bg-zinc-700"
+                    }`}
+                    title="Export directly to PDF"
+                  >
+                    {isExporting ? (
+                      <svg className="w-4 h-4 animate-spin text-gray-500" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                      </svg>
+                    )}
+                    {isExporting ? "Exporting..." : "Export PDF"}
+                  </button>
                 )}
-              </button>
+                {!isBinaryTab && (
+                  <button
+                    onClick={() => toggleEditMode(activeTab.id)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium ${
+                      activeTab.isEditMode
+                        ? "bg-blue-100 dark:bg-cyan-900/30 text-blue-700 dark:text-cyan-400"
+                        : "bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 hover:bg-gray-200 dark:hover:bg-zinc-700"
+                    }`}
+                  >
+                    {activeTab.isEditMode ? (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        Preview
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        Edit
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
 
             {/* Content Area */}
-            {activeTab.isEditMode ? (
+            {activeTab.isEditMode && !isBinaryTab ? (
               <>
                 <textarea
                   value={activeTab.content}
@@ -893,10 +1233,12 @@ function App() {
                   className="w-full min-h-[600px] p-4 bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-700 rounded-lg text-gray-800 dark:text-zinc-200 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-cyan-500 resize-vertical print:hidden"
                   spellCheck={false}
                 />
-                <MarkdownViewer content={activeTab.content} isDark={isDark} isPrint={true} />
+                <div className="hidden print:block">
+                  {renderTabContent(activeTab, isDark, true)}
+                </div>
               </>
             ) : (
-              <MarkdownViewer content={activeTab.content} isDark={isDark} />
+              renderTabContent(activeTab, isDark, false)
             )}
           </>
         ) : (
@@ -926,7 +1268,7 @@ function App() {
         </main>
       </div>
       {/* Offscreen container for PDF export */}
-      {activeTab && (
+      {activeTab && activeCategory !== "pdf" && (
         <div 
           id="pdf-export-content" 
           style={{ 
@@ -944,7 +1286,7 @@ function App() {
             overflow: 'visible'
           }}
         >
-          <MarkdownViewer content={activeTab.content} isDark={false} isPrint={true} />
+          {renderTabContent(activeTab, false, true)}
         </div>
       )}
       {/* Fullscreen loading overlay during PDF export */}

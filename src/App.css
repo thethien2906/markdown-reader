@@ -525,4 +525,97 @@ html.dark header {
   }
 }
 
+/* Code Viewer Syntax Highlighting */
+.code-viewer {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+/* Light Theme */
+.code-viewer-theme-light {
+  background-color: #FAFAFA;
+  color: #383A42;
+}
+.code-viewer-theme-light .token.property,
+.code-viewer-theme-light .token.tag,
+.code-viewer-theme-light .token.deleted {
+  color: #E45649;
+}
+.code-viewer-theme-light .token.string,
+.code-viewer-theme-light .token.char,
+.code-viewer-theme-light .token.inserted {
+  color: #50A14F;
+}
+.code-viewer-theme-light .token.number,
+.code-viewer-theme-light .token.boolean,
+.code-viewer-theme-light .token.constant {
+  color: #B76B01;
+}
+.code-viewer-theme-light .token.punctuation {
+  color: #383A42;
+}
+.code-viewer-theme-light .token.operator {
+  color: #4078F2;
+}
+.code-viewer-theme-light .token.comment,
+.code-viewer-theme-light .token.prolog,
+.code-viewer-theme-light .token.doctype {
+  color: #A0A1A7;
+  font-style: italic;
+}
+.code-viewer-theme-light .token.keyword {
+  color: #A626A4;
+}
+.code-viewer-theme-light .token.attr-name,
+.code-viewer-theme-light .token.key {
+  color: #986801;
+}
+.code-viewer-theme-light .token.function,
+.code-viewer-theme-light .token.class-name {
+  color: #4078F2;
+}
+
+/* Dark Theme */
+.code-viewer-theme-dark {
+  background-color: #121214;
+  color: #ABB2BF;
+}
+.code-viewer-theme-dark .token.property,
+.code-viewer-theme-dark .token.tag,
+.code-viewer-theme-dark .token.deleted {
+  color: #E06C75;
+}
+.code-viewer-theme-dark .token.string,
+.code-viewer-theme-dark .token.char,
+.code-viewer-theme-dark .token.inserted {
+  color: #98C379;
+}
+.code-viewer-theme-dark .token.number,
+.code-viewer-theme-dark .token.boolean,
+.code-viewer-theme-dark .token.constant {
+  color: #D19A66;
+}
+.code-viewer-theme-dark .token.punctuation {
+  color: #ABB2BF;
+}
+.code-viewer-theme-dark .token.operator {
+  color: #61AFEF;
+}
+.code-viewer-theme-dark .token.comment,
+.code-viewer-theme-dark .token.prolog,
+.code-viewer-theme-dark .token.doctype {
+  color: #5C6370;
+  font-style: italic;
+}
+.code-viewer-theme-dark .token.keyword {
+  color: #C678DD;
+}
+.code-viewer-theme-dark .token.attr-name,
+.code-viewer-theme-dark .token.key {
+  color: #E5C07B;
+}
+.code-viewer-theme-dark .token.function,
+.code-viewer-theme-dark .token.class-name {
+  color: #61AFEF;
+}
+
 
